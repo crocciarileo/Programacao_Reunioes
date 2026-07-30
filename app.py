@@ -22,9 +22,9 @@ def parse_pdf(file_bytes):
         txt = page.extract_text() or ""
         full_text += txt + "\n"
 
-    # Regex para identificar todas as semanas do mês
+    # Regex corrigida sem intervalos de hífen problemáticos
     weeks_raw = re.split(
-        r"(\d{1,2}\s*[-–—]\s*\d{1,2}\s+DE\s+[A-ZÇÁÉÍÓÚÂÊÔÃÕa-zçáéíóúâêôãõ]+(?:\s*[-–—]\s*\d{1,2}\s+DE\s+[A-ZÇÁÉÍÓÚÂÊÔÃÕa-zçáéíóúâêôãõ]+)?)",
+        r"(\d{1,2}\s*[\-–—]\s*\d{1,2}\s+DE\s+[A-ZÇÁÉÍÓÚÂÊÔÃÕa-zçáéíóúâêôãõ]+(?:\s*[\-–—]\s*\d{1,2}\s+DE\s+[A-ZÇÁÉÍÓÚÂÊÔÃÕa-zçáéíóúâêôãõ]+)?)",
         full_text,
         flags=re.IGNORECASE,
     )
@@ -35,11 +35,11 @@ def parse_pdf(file_bytes):
             header = weeks_raw[i].strip()
             content = weeks_raw[i + 1] if i + 1 < len(weeks_raw) else ""
 
-            # Extração do livro e capítulos bíblicos
-            line_match = re.search(r"\|\s*([A-Z0-9\s-–—]+)", content)
+            # Extração de leitura bíblica do cabeçalho
+            line_match = re.search(r"\|\s*([^\n\r•]+)", content)
             reading = line_match.group(1).strip() if line_match else ""
 
-            # Extração de Cânticos
+            # Extração dos Cânticos
             songs = re.findall(r"Cântico\s+\d+", content, re.IGNORECASE)
             song_start = songs[0] if len(songs) > 0 else "Cântico"
             song_mid = songs[1] if len(songs) > 1 else "Cântico"
