@@ -22,9 +22,9 @@ def parse_pdf(file_bytes):
         txt = page.extract_text() or ""
         full_text += txt + "\n"
 
-    # Regex corrigida e blindada para capturar o cabeçalho das semanas
+    # Regex para identificar todas as semanas do mês
     weeks_raw = re.split(
-        r"(\d{1,2}\s*[-–—]\s*\d{1,2}\s+DE\s+[A-ZÇÁÉÍÓÚÂÊÔÃÕa-zçáéíóúâêôãõ]+)",
+        r"(\d{1,2}\s*[-–—]\s*\d{1,2}\s+DE\s+[A-ZÇÁÉÍÓÚÂÊÔÃÕa-zçáéíóúâêôãõ]+(?:\s*[-–—]\s*\d{1,2}\s+DE\s+[A-ZÇÁÉÍÓÚÂÊÔÃÕa-zçáéíóúâêôãõ]+)?)",
         full_text,
         flags=re.IGNORECASE,
     )
@@ -35,8 +35,8 @@ def parse_pdf(file_bytes):
             header = weeks_raw[i].strip()
             content = weeks_raw[i + 1] if i + 1 < len(weeks_raw) else ""
 
-            # Regex corrigida (evita o re.PatternError)
-            line_match = re.search(r"\|\s*([^•\n\r]+)", content)
+            # Extração do livro e capítulos bíblicos
+            line_match = re.search(r"\|\s*([A-Z0-9\s-–—]+)", content)
             reading = line_match.group(1).strip() if line_match else ""
 
             # Extração de Cânticos
@@ -53,7 +53,7 @@ def parse_pdf(file_bytes):
             vida = [p for p in parts if p.startswith(("7.", "8.", "9."))]
 
             weeks.append({
-                "title": f"{header} | {reading}",
+                "title": f"{header} | {reading}" if reading else header,
                 "song_start": song_start,
                 "song_mid": song_mid,
                 "song_end": song_end,
@@ -90,43 +90,54 @@ if uploaded_file:
                     col1, col2 = st.columns(2)
                     with col1:
                         pres = st.text_input(
-                            "Presidente", key=f"pres_{idx}", placeholder="Nome"
+                            "Presidente",
+                            key=f"pres_week_{idx}",
+                            placeholder="Nome",
                         )
                     with col2:
                         or_ini = st.text_input(
                             "Oração Inicial",
-                            key=f"or_ini_{idx}",
+                            key=f"or_ini_week_{idx}",
                             placeholder="Nome",
                         )
 
                     st.markdown("**TESOUROS DA PALAVRA DE DEUS**")
-                    t_designations = {}
-                    for p in week["tesouros"]:
-                        t_designations[p[0]] = st.text_input(
-                            p, key=f"p_{idx}_{p[0]}", placeholder="Nome do irmão"
+                    t_designations = []
+                    for p_idx, p in enumerate(week["tesouros"]):
+                        val = st.text_input(
+                            p,
+                            key=f"t_{idx}_{p_idx}",
+                            placeholder="Nome do irmão",
                         )
+                        t_designations.append((p, val))
 
                     st.markdown("**FAÇA SEU MELHOR NO MINISTÉRIO**")
-                    m_designations = {}
-                    for p in week["ministerio"]:
-                        m_designations[p[0]] = st.text_input(
-                            p, key=f"p_{idx}_{p[0]}", placeholder="Nome(s)"
+                    m_designations = []
+                    for p_idx, p in enumerate(week["ministerio"]):
+                        val = st.text_input(
+                            p, key=f"m_{idx}_{p_idx}", placeholder="Nome(s)"
                         )
+                        m_designations.append((p, val))
 
                     st.markdown("**NOSSA VIDA CRISTÃ**")
-                    v_designations = {}
-                    for p in week["vida"]:
+                    v_designations = []
+                    for p_idx, p in enumerate(week["vida"]):
                         label = (
                             f"{p} (Dirigente/Leitor)"
                             if "Estudo bíblico" in p
                             else p
                         )
-                        v_designations[p[0]] = st.text_input(
-                            label, key=f"p_{idx}_{p[0]}", placeholder="Nome(s)"
+                        val = st.text_input(
+                            label,
+                            key=f"v_{idx}_{p_idx}",
+                            placeholder="Nome(s)",
                         )
+                        v_designations.append((p, val))
 
                     or_fim = st.text_input(
-                        "Oração Final", key=f"or_fim_{idx}", placeholder="Nome"
+                        "Oração Final",
+                        key=f"or_fim_week_{idx}",
+                        placeholder="Nome",
                     )
 
                     form_data.append({
@@ -146,11 +157,10 @@ if uploaded_file:
                 for item in form_data:
                     week = item["week"]
 
-                    def build_rows(parts_list, des_dict):
+                    def build_rows(des_list):
                         rows = ""
-                        for p in parts_list:
-                            val = des_dict.get(p[0], "")
-                            rows += f"<tr><td class='p-title'>{p}</td><td class='p-val'>{val}</td></tr>"
+                        for part_title, val in des_list:
+                            rows += f"<tr><td class='p-title'>{part_title}</td><td class='p-val'>{val}</td></tr>"
                         return rows
 
                     page_html = f"""
@@ -171,14 +181,14 @@ if uploaded_file:
                         <div class="song-row">• {week['song_start']} &nbsp;|&nbsp; • Comentários iniciais (1 min)</div>
                         
                         <div class="section-header tesouros">TESOUROS DA PALAVRA DE DEUS <span style="float:right; font-weight:normal;">Salão principal</span></div>
-                        <table class="program-table">{build_rows(week['tesouros'], item['t_des'])}</table>
+                        <table class="program-table">{build_rows(item['t_des'])}</table>
                         
                         <div class="section-header ministerio">FAÇA SEU MELHOR NO MINISTÉRIO <span style="float:right; font-weight:normal;">Salão principal</span></div>
-                        <table class="program-table">{build_rows(week['ministerio'], item['m_des'])}</table>
+                        <table class="program-table">{build_rows(item['m_des'])}</table>
                         
                         <div class="section-header vida">NOSSA VIDA CRISTÃ</div>
                         <div class="song-row">• {week['song_mid']}</div>
-                        <table class="program-table">{build_rows(week['vida'], item['v_des'])}</table>
+                        <table class="program-table">{build_rows(item['v_des'])}</table>
                         
                         <div class="song-row">• Comentários finais (3 min) &nbsp;|&nbsp; • {week['song_end']}</div>
                         <table class="footer-roles">
