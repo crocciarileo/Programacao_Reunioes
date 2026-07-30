@@ -1,5 +1,5 @@
 import re
-import pypdf
+import pdfplumber
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -15,29 +15,29 @@ uploaded_file = st.file_uploader(
 )
 
 
-def parse_pdf(file_bytes):
-    reader = pypdf.PdfReader(file_bytes)
+def parse_pdf_plumber(file_bytes):
     full_text = ""
-    for page in reader.pages:
-        txt = page.extract_text() or ""
-        full_text += txt + "\n"
+    # Lê o PDF de forma precisa mantendo a ordem do texto
+    with pdfplumber.open(file_bytes) as pdf:
+        for page in pdf.pages:
+            txt = page.extract_text(layout=False) or ""
+            full_text += txt + "\n"
 
-    # Regex corrigida sem intervalos de hífen problemáticos
+    # Quebra o texto apenas onde começa o cabeçalho de uma nova semana
+    # Exemplo: "5-11 DE OUTUBRO | ISAIAS 1-3" ou "2-8 DE NOVEMBRO | JEREMIAS 49-50"
     weeks_raw = re.split(
-        r"(\d{1,2}\s*[\-–—]\s*\d{1,2}\s+DE\s+[A-ZÇÁÉÍÓÚÂÊÔÃÕa-zçáéíóúâêôãõ]+(?:\s*[\-–—]\s*\d{1,2}\s+DE\s+[A-ZÇÁÉÍÓÚÂÊÔÃÕa-zçáéíóúâêôãõ]+)?)",
+        r"(\d{1,2}\s*[\-–—]\s*\d{1,2}\s+DE\s+[A-ZÇÁÉÍÓÚÂÊÔÃÕa-zçáéíóúâêôãõ]+(?:\s*[\-–—]\s*\d{1,2}\s+DE\s+[A-ZÇÁÉÍÓÚÂÊÔÃÕa-zçáéíóúâêôãõ]+)?\s*\|\s*[^\n\r]+)",
         full_text,
-        flags=re.IGNORECASE,
     )
 
     weeks = []
     if len(weeks_raw) > 1:
         for i in range(1, len(weeks_raw), 2):
             header = weeks_raw[i].strip()
-            content = weeks_raw[i + 1] if i + 1 < len(weeks_raw) else ""
+            # Limpa quebras de linha dentro do próprio cabeçalho
+            header = " ".join(header.split())
 
-            # Extração de leitura bíblica do cabeçalho
-            line_match = re.search(r"\|\s*([^\n\r•]+)", content)
-            reading = line_match.group(1).strip() if line_match else ""
+            content = weeks_raw[i + 1] if i + 1 < len(weeks_raw) else ""
 
             # Extração dos Cânticos
             songs = re.findall(r"Cântico\s+\d+", content, re.IGNORECASE)
@@ -45,15 +45,39 @@ def parse_pdf(file_bytes):
             song_mid = songs[1] if len(songs) > 1 else "Cântico"
             song_end = songs[2] if len(songs) > 2 else "Cântico"
 
-            # Extração das Partes
-            parts = re.findall(r"(\d\.\s*[^0-9\n\•]+?\(\d+\s*min\))", content)
+            # Extração de partes numeradas (1. até 9.) de forma única e sem duplicações
+            raw_parts = re.findall(
+                r"(\d{1,2}\.\s*[^0-9\n\•]+?\(\d+\s*min\))", content
+            )
 
-            tesouros = [p for p in parts if p.startswith(("1.", "2.", "3."))]
-            ministerio = [p for p in parts if p.startswith(("4.", "5.", "6."))]
-            vida = [p for p in parts if p.startswith(("7.", "8.", "9."))]
+            seen_nums = set()
+            clean_parts = []
+            for p in raw_parts:
+                p_clean = " ".join(p.split())
+                num = p_clean.split(".")[0].strip()
+                # Garante que não duplica partes com o mesmo número na mesma semana
+                if num not in seen_nums:
+                    seen_nums.add(num)
+                    clean_parts.append(p_clean)
+
+            tesouros = [
+                p
+                for p in clean_parts
+                if p.startswith(("1.", "2.", "3.", "1 ", "2 ", "3 "))
+            ]
+            ministerio = [
+                p
+                for p in clean_parts
+                if p.startswith(("4.", "5.", "6.", "4 ", "5 ", "6 "))
+            ]
+            vida = [
+                p
+                for p in clean_parts
+                if int(p.split(".")[0]) >= 7 if p.split(".")[0].isdigit()
+            ]
 
             weeks.append({
-                "title": f"{header} | {reading}" if reading else header,
+                "title": header,
                 "song_start": song_start,
                 "song_mid": song_mid,
                 "song_end": song_end,
@@ -66,7 +90,7 @@ def parse_pdf(file_bytes):
 
 if uploaded_file:
     try:
-        weeks_data = parse_pdf(uploaded_file)
+        weeks_data = parse_pdf_plumber(uploaded_file)
         if not weeks_data:
             st.warning(
                 "Nenhuma semana encontrada no PDF. Verifique se o arquivo enviado é a apostila mensal."
@@ -124,7 +148,7 @@ if uploaded_file:
                     for p_idx, p in enumerate(week["vida"]):
                         label = (
                             f"{p} (Dirigente/Leitor)"
-                            if "Estudo bíblico" in p
+                            if "Estudo bíblico" in p or "Estudo b" in p
                             else p
                         )
                         val = st.text_input(
@@ -245,4 +269,4 @@ if uploaded_file:
 
                 components.html(full_preview, height=800, scrolling=True)
     except Exception as e:
-        st.error(f"Ocorreu um erro ao ler o PDF: {e}")
+        st.error(f"Ocorreu um erro ao processar o PDF: {e}")
