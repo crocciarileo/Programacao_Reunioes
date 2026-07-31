@@ -1,6 +1,4 @@
 import re
-import unicodedata
-import pdfplumber
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -8,129 +6,111 @@ st.set_page_config(
     page_title="Gerador da Programação (S-140-T)", page_icon="📋", layout="wide"
 )
 
-st.title("📋 Gerador de Programação da Reunião (S-140-T)")
-st.subheader("Suba o PDF da Apostila do Mês para gerar as folhas de reunião.")
+st.title("📋 Gerador Automático de Programação (S-140-T)")
+st.subheader("Suba o arquivo .RTF da Apostila do Mês para ler a programação.")
 
 uploaded_file = st.file_uploader(
-    "Escolha o PDF da Apostila do Mês (mwb_T_...pdf)", type=["pdf"]
+    "Escolha o arquivo .RTF da Apostila do Mês", type=["rtf"]
 )
 
 
-def sanitize_text(text):
-    if not text:
-        return ""
+def decode_rtf(rtf_bytes):
+    # Converte códigos de acentuação RTF do JW (ex: \u227? -> ã)
+    text = rtf_bytes.decode("latin-1", errors="ignore")
 
-    # 1. Corrige acentos soltos (ex: 'e ´ oProtetor' -> 'é o Protetor')
-    text = re.sub(r"([a-zA-Z])\s*[\'\`\´\^]\s*([a-zA-Z])", r"\1\2", text)
-    text = (
-        text.replace("´ a", "á")
-        .replace("´ e", "é")
-        .replace("´ i", "í")
-        .replace("´ o", "ó")
-        .replace("´ u", "ú")
-    )
-    text = (
-        text.replace("` a", "à")
-        .replace("^ a", "â")
-        .replace("^ e", "ê")
-        .replace("^ o", "ô")
-    )
-    text = text.replace("~ a", "ã").replace("~ o", "õ").replace(", ca", "ça")
+    # Substituição de caracteres unicode RTF (\uXXXX?)
+    def replace_unicode(match):
+        code = int(match.group(1))
+        return chr(code)
 
-    # 2. Adiciona espaço entre letras minúsculas e maiúsculas coladas (ex: "JoiasEspirituais" -> "Joias Espirituais")
-    text = re.sub(r"([a-zçáéíóúâêôãõ])([A-ZÇÁÉÍÓÚÂÊÔÃÕ])", r"\1 \2", text)
+    text = re.sub(r"\\u(\d+)\?", replace_unicode, text)
 
-    # 3. Adiciona espaço antes de parenteses colados (ex: "(10min)" -> " (10 min)")
-    text = re.sub(r"([a-zA-Zçáéíóúâêôãõ])\(", r"\1 (", text)
-    text = re.sub(r"\((\d+)\s*min\)", r"(\1 min)", text)
+    # Limpeza de tags de estilo RTF (\par, \f0, \cf1, etc)
+    text = re.sub(r"\\[a-zA-Z0-9]+\b\s?", " ", text)
+    text = re.sub(r"[{}]", "", text)
 
-    # 4. Normaliza múltiplos espaços
+    # Limpeza de espaços duplos
     text = " ".join(text.split())
 
     return text
 
 
-def parse_pdf_plumber(file_bytes):
-    full_text = ""
-    with pdfplumber.open(file_bytes) as pdf:
-        for page in pdf.pages:
-            txt = page.extract_text(layout=False) or ""
-            full_text += txt + "\n"
-
-    # Quebra por semanas através das datas no formato oficial do JW (ex: 7-13 DE SETEMBRO)
-    weeks_raw = re.split(
-        r"(\d{1,2}\s*[\-–—]\s*\d{1,2}\s+DE\s+[A-ZÇÁÉÍÓÚÂÊÔÃÕ]+(?:\s*[\-–—]\s*\d{1,2}\s+DE\s+[A-ZÇÁÉÍÓÚÂÊÔÃÕ]+)?)",
-        full_text,
-        flags=re.IGNORECASE,
-    )
+def parse_rtf_mwb(rtf_text):
+    # Expressão regular para encontrar semanas (ex: 2 a 8 de novembro (Jeremias 49 a 50))
+    week_pattern = r"(\d{1,2}\s+a\s+\d{1,2}\s+de\s+[a-zçáéíóúâêôãõ]+\s*\([^)]+\))"
+    weeks_matches = list(re.finditer(week_pattern, rtf_text, re.IGNORECASE))
 
     weeks = []
-    if len(weeks_raw) > 1:
-        for i in range(1, len(weeks_raw), 2):
-            date_header = sanitize_text(weeks_raw[i])
-            content = weeks_raw[i + 1] if i + 1 < len(weeks_raw) else ""
 
-            # Extração da Leitura Bíblica da semana
-            reading_match = re.search(r"\|\s*([^\n\r•]+)", content)
-            reading = (
-                sanitize_text(reading_match.group(1)) if reading_match else ""
-            )
+    for i in range(len(weeks_matches)):
+        start_idx = weeks_matches[i].start()
+        end_idx = (
+            weeks_matches[i + 1].start()
+            if i + 1 < len(weeks_matches)
+            else len(rtf_text)
+        )
 
-            full_title = (
-                f"{date_header} | {reading}" if reading else date_header
-            )
+        block = rtf_text[start_idx:end_idx]
 
-            # Extração dos Cânticos da semana
-            songs = re.findall(r"Cântico\s+\d+", content, re.IGNORECASE)
-            song_start = songs[0] if len(songs) > 0 else "Cântico"
-            song_mid = songs[1] if len(songs) > 1 else "Cântico"
-            song_end = songs[2] if len(songs) > 2 else "Cântico"
+        # Cabeçalho da Semana
+        week_title = weeks_matches[i].group(1).strip()
 
-            # Captura TODAS as partes numeradas (ex: "1. Titulo da Parte (10 min)")
-            raw_parts = re.findall(
-                r"(\d{1,2}\.\s*[^0-9\n\•]+?\(\d+\s*min\))", content
-            )
+        # Cânticos
+        songs = re.findall(r"Cântico\s+\d+", block, re.IGNORECASE)
+        song_start = songs[0] if len(songs) > 0 else "Cântico 1"
+        song_mid = songs[1] if len(songs) > 1 else "Cântico"
+        song_end = songs[2] if len(songs) > 2 else "Cântico"
 
-            seen_nums = set()
-            clean_parts = []
-            for p in raw_parts:
-                p_clean = sanitize_text(p)
-                num = p_clean.split(".")[0].strip()
-                if num.isdigit() and num not in seen_nums:
-                    seen_nums.add(num)
-                    clean_parts.append((int(num), p_clean))
+        # Partes numeradas (1. até 9.)
+        raw_parts = re.findall(
+            r"(\d{1,2}\.\s*[^0-9\•\n\r]+?\(\d+\s*min\))", block
+        )
 
-            # Ordena as partes pelo número da designação
-            clean_parts.sort(key=lambda x: x[0])
+        seen_nums = set()
+        clean_parts = []
+        for p in raw_parts:
+            p_clean = " ".join(p.split())
+            num_str = p_clean.split(".")[0].strip()
+            if num_str.isdigit() and num_str not in seen_nums:
+                seen_nums.add(num_str)
+                clean_parts.append((int(num_str), p_clean))
 
-            tesouros = [p[1] for p in clean_parts if 1 <= p[0] <= 3]
-            ministerio = [p[1] for p in clean_parts if 4 <= p[0] <= 6]
-            vida = [p[1] for p in clean_parts if p[0] >= 7]
+        clean_parts.sort(key=lambda x: x[0])
 
-            weeks.append({
-                "title": full_title,
-                "song_start": song_start,
-                "song_mid": song_mid,
-                "song_end": song_end,
-                "tesouros": tesouros,
-                "ministerio": ministerio,
-                "vida": vida,
-            })
+        tesouros = [p[1] for p in clean_parts if 1 <= p[0] <= 3]
+        ministerio = [p[1] for p in clean_parts if 4 <= p[0] <= 6]
+        vida = [p[1] for p in clean_parts if p[0] >= 7]
+
+        weeks.append({
+            "title": week_title,
+            "song_start": song_start,
+            "song_mid": song_mid,
+            "song_end": song_end,
+            "tesouros": tesouros,
+            "ministerio": ministerio,
+            "vida": vida,
+        })
+
     return weeks
 
 
 if uploaded_file:
     try:
-        weeks_data = parse_pdf_plumber(uploaded_file)
+        raw_bytes = uploaded_file.read()
+        rtf_clean_text = decode_rtf(raw_bytes)
+        weeks_data = parse_rtf_mwb(rtf_clean_text)
+
         if not weeks_data:
-            st.warning(
-                "Nenhuma semana encontrada no PDF. Verifique se o arquivo enviado é a apostila mensal."
+            st.error(
+                "Nenhuma semana encontrada. Verifique se o arquivo enviado é o arquivo .RTF da apostila."
             )
         else:
-            st.success(f"{len(weeks_data)} semanas extraídas com sucesso!")
+            st.success(
+                f"{len(weeks_data)} semana(s) extraída(s) com sucesso a partir do arquivo .RTF!"
+            )
 
             st.markdown("---")
-            st.header("Preencha os Irmãos Designados")
+            st.header("Preencha apenas os Nomes dos Irmãos")
 
             tab_names = [f"Semana {i+1}" for i in range(len(weeks_data))]
             tabs = st.tabs(tab_names)
@@ -146,53 +126,50 @@ if uploaded_file:
                     with col1:
                         pres = st.text_input(
                             "Presidente",
-                            key=f"pres_week_{idx}",
-                            placeholder="Nome",
+                            key=f"pres_{idx}",
+                            placeholder="Nome do irmão",
                         )
                     with col2:
                         or_ini = st.text_input(
                             "Oração Inicial",
-                            key=f"or_ini_week_{idx}",
-                            placeholder="Nome",
+                            key=f"or_ini_{idx}",
+                            placeholder="Nome do irmão",
                         )
 
                     st.markdown("**TESOUROS DA PALAVRA DE DEUS**")
-                    t_designations = []
-                    for p_idx, p in enumerate(week["tesouros"]):
+                    t_des = []
+                    for p_idx, part_title in enumerate(week["tesouros"]):
                         val = st.text_input(
-                            p,
+                            part_title,
                             key=f"t_{idx}_{p_idx}",
                             placeholder="Nome do irmão",
                         )
-                        t_designations.append((p, val))
+                        t_des.append((part_title, val))
 
                     st.markdown("**FAÇA SEU MELHOR NO MINISTÉRIO**")
-                    m_designations = []
-                    for p_idx, p in enumerate(week["ministerio"]):
+                    m_des = []
+                    for p_idx, part_title in enumerate(week["ministerio"]):
                         val = st.text_input(
-                            p, key=f"m_{idx}_{p_idx}", placeholder="Nome(s)"
-                        )
-                        m_designations.append((p, val))
-
-                    st.markdown("**NOSSA VIDA CRISTÃ**")
-                    v_designations = []
-                    for p_idx, p in enumerate(week["vida"]):
-                        label = (
-                            f"{p} (Dirigente/Leitor)"
-                            if "Estudo bíblico" in p or "Estudo b" in p
-                            else p
-                        )
-                        val = st.text_input(
-                            label,
-                            key=f"v_{idx}_{p_idx}",
+                            part_title,
+                            key=f"m_{idx}_{p_idx}",
                             placeholder="Nome(s)",
                         )
-                        v_designations.append((p, val))
+                        m_des.append((part_title, val))
+
+                    st.markdown("**NOSSA VIDA CRISTÃ**")
+                    v_des = []
+                    for p_idx, part_title in enumerate(week["vida"]):
+                        val = st.text_input(
+                            part_title,
+                            key=f"v_{idx}_{p_idx}",
+                            placeholder="Nome / Dirigente e Leitor",
+                        )
+                        v_des.append((part_title, val))
 
                     or_fim = st.text_input(
                         "Oração Final",
-                        key=f"or_fim_week_{idx}",
-                        placeholder="Nome",
+                        key=f"or_fim_{idx}",
+                        placeholder="Nome do irmão",
                     )
 
                     form_data.append({
@@ -200,9 +177,9 @@ if uploaded_file:
                         "pres": pres,
                         "or_ini": or_ini,
                         "or_fim": or_fim,
-                        "t_des": t_designations,
-                        "m_des": m_designations,
-                        "v_des": v_designations,
+                        "t_des": t_des,
+                        "m_des": m_des,
+                        "v_des": v_des,
                     })
 
             st.markdown("---")
@@ -300,4 +277,4 @@ if uploaded_file:
 
                 components.html(full_preview, height=800, scrolling=True)
     except Exception as e:
-        st.error(f"Ocorreu um erro ao processar o PDF: {e}")
+        st.error(f"Erro ao processar o arquivo .RTF: {e}")
