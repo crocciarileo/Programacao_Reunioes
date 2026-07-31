@@ -105,6 +105,8 @@ uploaded_files = st.file_uploader(
 
 def decode_and_clean_rtf(rtf_bytes):
     text = rtf_bytes.decode("latin-1", errors="ignore")
+
+    # Remove tags de HYPERLINK e urls do RTF
     text = re.sub(
         r"\{\\field\{\\\*\\fldinst\s*\{HYPERLINK[^\}]+\}\}\s*\{\\fldrslt\s*\{([^\}]+)\}\}\}",
         r"\1",
@@ -112,13 +114,28 @@ def decode_and_clean_rtf(rtf_bytes):
     )
     text = re.sub(r"HYPERLINK\s+\"[^\"]+\"", "", text)
 
+    # Converte unicode do RTF
     def replace_unicode(match):
         code = int(match.group(1))
         return chr(code)
 
     text = re.sub(r"\\u(\d+)\?", replace_unicode, text)
+
+    # Limpa tags de estilo RTF
     text = re.sub(r"\\[a-zA-Z0-9]+\b\s?", " ", text)
     text = re.sub(r"[{}]", "", text)
+
+    # Remove metadados / cabeçalhos de copyright do JW
+    text = re.sub(
+        r"Copyright\s*©?\s*\d{4}\s*Christian Congregation of Jehovah's Witnesses",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"Times New Roman|Latha|Arial|Title|Heading \d", "", text, flags=re.IGNORECASE
+    )
+
     text = " ".join(text.split()).replace("*", "").strip()
     return text
 
@@ -142,11 +159,14 @@ def extract_sort_key(week_title):
 
     title_lower = week_title.lower()
 
+    # Identifica o primeiro mês mencionado na frase
     month_num = 99
+    first_m_idx = 9999
     for idx, m_nome in enumerate(meses):
-        if m_nome in title_lower:
+        pos = title_lower.find(m_nome)
+        if pos != -1 and pos < first_m_idx:
+            first_m_idx = pos
             month_num = (idx % 12) + 1
-            break
 
     match_day = re.search(r"(\d{1,2})", week_title)
     day = int(match_day.group(1)) if match_day else 99
@@ -155,22 +175,27 @@ def extract_sort_key(week_title):
 
 
 def parse_rtf_week_contextual(clean_text):
-    # Regex flexibilizada para pegar viradas de mês e qualquer formato de data do JW
+    # Regex abrangente para capturar qualquer data do JW (incluindo "1.º de novembro" e viradas de mês)
     week_match = re.search(
-        r"(\d{1,2}\s+(?:a\s+\d{1,2}\s+de\s+[a-zçáéíóúâêôãõ]+|de\s+[a-zçáéíóúâêôãõ]+\s+a\s+\d{1,2}\s+de\s+[a-zçáéíóúâêôãõ]+)\s*\([^)]+\))",
+        r"(\d{1,2}\s+(?:a\s+\d{1,2}(?:\.º|º)?\s+de\s+[a-zçáéíóúâêôãõ]+|de\s+[a-zçáéíóúâêôãõ]+\s+a\s+\d{1,2}(?:\.º|º)?\s+de\s+[a-zçáéíóúâêôãõ]+)\s*\([^)]+\))",
         clean_text,
         re.IGNORECASE,
     )
 
     if not week_match:
-        # Busca genérica para títulos com parênteses bíblicos
+        # Padrão fallback para pegar números de dias e parênteses de livros da Bíblia
         week_match = re.search(
-            r"(\d{1,2}[^\(\n\r]+?\([^\)]+\))", clean_text, re.IGNORECASE
+            r"(\d{1,2}\s+[^\(\r\n]+?\([^\)]+\))", clean_text, re.IGNORECASE
         )
 
     week_title = (
         week_match.group(1).strip() if week_match else "Semana da Reunião"
     )
+
+    # Limpeza final caso tenha ficado algum resíduo no título da semana
+    week_title = re.sub(
+        r"^(Ariranha|Title|Heading\s*\d*)\s*", "", week_title, flags=re.IGNORECASE
+    ).strip()
 
     songs = re.findall(r"Cântico\s+\d+", clean_text, re.IGNORECASE)
     song_start = songs[0] if len(songs) > 0 else "Cântico"
@@ -233,6 +258,7 @@ if uploaded_files:
         week_info = parse_rtf_week_contextual(clean_text)
         extracted.append(week_info)
 
+    # Ordena rigorosamente por Mês e Dia
     extracted.sort(key=lambda x: x["sort_key"])
     st.session_state.weeks_data = extracted
     salvar_dado_db("weeks_data", extracted)
