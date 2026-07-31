@@ -43,7 +43,7 @@ if not st.session_state.autenticado:
 
 
 # ==========================================
-# 💾 BANCO DE DADOS LOCAL (PERSISTÊNCIA NA NUVEM/SISTEMA)
+# 💾 BANCO DE DADOS LOCAL (PERSISTÊNCIA NA NUVEM)
 # ==========================================
 DB_FILE = "dados_programacao.db"
 
@@ -88,7 +88,7 @@ init_db()
 
 
 # ==========================================
-# 📋 APLICATIVO PRINCIPAL
+# 📋 PROCESSAMENTO E EXTRAÇÃO DE TEXTO RTF
 # ==========================================
 
 st.title("📋 Gerador Automático de Programação (S-140-T)")
@@ -128,7 +128,8 @@ def extract_day_number(week_title):
     return int(match.group(1)) if match else 99
 
 
-def parse_rtf_week(clean_text):
+def parse_rtf_week_contextual(clean_text):
+    # Procura a data da semana
     week_match = re.search(
         r"(\d{1,2}\s+a\s+\d{1,2}\s+de\s+[a-zçáéíóúâêôãõ]+\s*\([^)]+\))",
         clean_text,
@@ -138,29 +139,52 @@ def parse_rtf_week(clean_text):
         week_match.group(1).strip() if week_match else "Semana da Reunião"
     )
 
+    # Extração de Cânticos
     songs = re.findall(r"Cântico\s+\d+", clean_text, re.IGNORECASE)
     song_start = songs[0] if len(songs) > 0 else "Cântico"
     song_mid = songs[1] if len(songs) > 1 else "Cântico"
     song_end = songs[2] if len(songs) > 2 else "Cântico"
 
-    raw_parts = re.findall(
-        r"(\d{1,2}\.\s*[^0-9\•\n\r]+?\(\d+\s*min\))", clean_text
+    # Quebra o texto por SeçõesOficiais para não errar a categoria das partes
+    sec_tesouros = ""
+    sec_ministerio = ""
+    sec_vida = ""
+
+    # Marcadores das seções no RTF
+    pos_tesouros = re.search(
+        r"Tesouros da Palavra de Deus", clean_text, re.IGNORECASE
     )
+    pos_ministerio = re.search(
+        r"Faça seu melhor no ministério", clean_text, re.IGNORECASE
+    )
+    pos_vida = re.search(r"Nossa vida cristã", clean_text, re.IGNORECASE)
 
-    seen_nums = set()
-    clean_parts = []
-    for p in raw_parts:
-        p_str = " ".join(p.split())
-        num_str = p_str.split(".")[0].strip()
-        if num_str.isdigit() and num_str not in seen_nums:
-            seen_nums.add(num_str)
-            clean_parts.append((int(num_str), p_str))
+    idx_t = pos_tesouros.start() if pos_tesouros else 0
+    idx_m = pos_ministerio.start() if pos_ministerio else len(clean_text)
+    idx_v = pos_vida.start() if pos_vida else len(clean_text)
 
-    clean_parts.sort(key=lambda x: x[0])
+    sec_tesouros = clean_text[idx_t:idx_m]
+    sec_ministerio = clean_text[idx_m:idx_v]
+    sec_vida = clean_text[idx_v:]
 
-    tesouros = [p[1] for p in clean_parts if 1 <= p[0] <= 3]
-    ministerio = [p[1] for p in clean_parts if 4 <= p[0] <= 6]
-    vida = [p[1] for p in clean_parts if p[0] >= 7]
+    def get_parts_from_block(block_text):
+        raw_parts = re.findall(
+            r"(\d{1,2}\.\s*[^0-9\•\n\r]+?\(\d+\s*min\))", block_text
+        )
+        seen_nums = set()
+        clean_parts = []
+        for p in raw_parts:
+            p_str = " ".join(p.split())
+            num_str = p_str.split(".")[0].strip()
+            if num_str.isdigit() and num_str not in seen_nums:
+                seen_nums.add(num_str)
+                clean_parts.append((int(num_str), p_str))
+        clean_parts.sort(key=lambda x: x[0])
+        return [p[1] for p in clean_parts]
+
+    tesouros = get_parts_from_block(sec_tesouros)
+    ministerio = get_parts_from_block(sec_ministerio)
+    vida = get_parts_from_block(sec_vida)
 
     return {
         "title": week_title,
@@ -180,7 +204,7 @@ if uploaded_files:
     for file in uploaded_files:
         raw_bytes = file.read()
         clean_text = decode_and_clean_rtf(raw_bytes)
-        week_info = parse_rtf_week(clean_text)
+        week_info = parse_rtf_week_contextual(clean_text)
         extracted.append(week_info)
 
     extracted.sort(key=lambda x: x["day_sort"])
@@ -200,7 +224,7 @@ if st.session_state.get("weeks_data"):
     col_status, col_btn = st.columns([4, 1])
     with col_status:
         st.success(
-            f"{len(st.session_state.weeks_data)} semana(s) registradas e salvas na memória!"
+            f"{len(st.session_state.weeks_data)} semana(s) registadas e salvas na memória!"
         )
     with col_btn:
         if st.button("🗑️ Limpar Tudo"):
@@ -329,7 +353,7 @@ if st.session_state.get("weeks_data"):
                 <table class="roles-bar">
                     <tr>
                         <td><b>Presidente:</b> {item['pres']}</td>
-                        <td style="text-align:right;"><b>Oração:</b> {item['or_ini']}</td>
+                        <td style="text-align:right;"><b>Oração Inicial:</b> {item['or_ini']}</td>
                     </tr>
                 </table>
                 <div class="song-row">• {week['song_start']} &nbsp;|&nbsp; • Comentários iniciais (1 min)</div>
@@ -347,7 +371,7 @@ if st.session_state.get("weeks_data"):
                 <div class="song-row">• Comentários finais (3 min) &nbsp;|&nbsp; • {week['song_end']}</div>
                 <table class="footer-roles">
                     <tr>
-                        <td><b>Oração:</b> {item['or_fim']}</td>
+                        <td><b>Oração Final:</b> {item['or_fim']}</td>
                         <td style="text-align:right; color:#64748b; font-size:8pt;">S-140-T 11/23</td>
                     </tr>
                 </table>
