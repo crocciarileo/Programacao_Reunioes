@@ -17,35 +17,42 @@ uploaded_file = st.file_uploader(
 
 def parse_pdf_plumber(file_bytes):
     full_text = ""
-    # Lê o PDF de forma precisa mantendo a ordem do texto
     with pdfplumber.open(file_bytes) as pdf:
         for page in pdf.pages:
             txt = page.extract_text(layout=False) or ""
             full_text += txt + "\n"
 
-    # Quebra o texto apenas onde começa o cabeçalho de uma nova semana
-    # Exemplo: "5-11 DE OUTUBRO | ISAIAS 1-3" ou "2-8 DE NOVEMBRO | JEREMIAS 49-50"
+    # Quebra o texto identificando o início de cada semana pelas datas (ex: 2-8 DE NOVEMBRO, 9-15 DE NOVEMBRO)
     weeks_raw = re.split(
-        r"(\d{1,2}\s*[\-–—]\s*\d{1,2}\s+DE\s+[A-ZÇÁÉÍÓÚÂÊÔÃÕa-zçáéíóúâêôãõ]+(?:\s*[\-–—]\s*\d{1,2}\s+DE\s+[A-ZÇÁÉÍÓÚÂÊÔÃÕa-zçáéíóúâêôãõ]+)?\s*\|\s*[^\n\r]+)",
+        r"(\d{1,2}\s*[\-–—]\s*\d{1,2}\s+DE\s+[A-ZÇÁÉÍÓÚÂÊÔÃÕ]+(?:\s*[\-–—]\s*\d{1,2}\s+DE\s+[A-ZÇÁÉÍÓÚÂÊÔÃÕ]+)?)",
         full_text,
+        flags=re.IGNORECASE,
     )
 
     weeks = []
     if len(weeks_raw) > 1:
         for i in range(1, len(weeks_raw), 2):
-            header = weeks_raw[i].strip()
-            # Limpa quebras de linha dentro do próprio cabeçalho
-            header = " ".join(header.split())
-
+            date_header = weeks_raw[i].strip()
             content = weeks_raw[i + 1] if i + 1 < len(weeks_raw) else ""
 
-            # Extração dos Cânticos
+            # Tenta pegar a leitura bíblica na mesma linha ou logo após a data
+            reading_match = re.search(r"\|\s*([^\n\r•]+)", content)
+            reading = (
+                reading_match.group(1).strip() if reading_match else ""
+            )
+
+            full_title = (
+                f"{date_header} | {reading}" if reading else date_header
+            )
+            full_title = " ".join(full_title.split())
+
+            # Extração de Cânticos
             songs = re.findall(r"Cântico\s+\d+", content, re.IGNORECASE)
             song_start = songs[0] if len(songs) > 0 else "Cântico"
             song_mid = songs[1] if len(songs) > 1 else "Cântico"
             song_end = songs[2] if len(songs) > 2 else "Cântico"
 
-            # Extração de partes numeradas (1. até 9.) de forma única e sem duplicações
+            # Extração das Partes (ex: 1. Titulo (10 min))
             raw_parts = re.findall(
                 r"(\d{1,2}\.\s*[^0-9\n\•]+?\(\d+\s*min\))", content
             )
@@ -55,29 +62,28 @@ def parse_pdf_plumber(file_bytes):
             for p in raw_parts:
                 p_clean = " ".join(p.split())
                 num = p_clean.split(".")[0].strip()
-                # Garante que não duplica partes com o mesmo número na mesma semana
                 if num not in seen_nums:
                     seen_nums.add(num)
                     clean_parts.append(p_clean)
 
-            tesouros = [
-                p
-                for p in clean_parts
-                if p.startswith(("1.", "2.", "3.", "1 ", "2 ", "3 "))
-            ]
-            ministerio = [
-                p
-                for p in clean_parts
-                if p.startswith(("4.", "5.", "6.", "4 ", "5 ", "6 "))
-            ]
-            vida = [
-                p
-                for p in clean_parts
-                if int(p.split(".")[0]) >= 7 if p.split(".")[0].isdigit()
-            ]
+            tesouros = []
+            ministerio = []
+            vida = []
+
+            for p in clean_parts:
+                try:
+                    num = int(p.split(".")[0].strip())
+                    if 1 <= num <= 3:
+                        tesouros.append(p)
+                    elif 4 <= num <= 6:
+                        ministerio.append(p)
+                    elif num >= 7:
+                        vida.append(p)
+                except ValueError:
+                    continue
 
             weeks.append({
-                "title": header,
+                "title": full_title,
                 "song_start": song_start,
                 "song_mid": song_mid,
                 "song_end": song_end,
