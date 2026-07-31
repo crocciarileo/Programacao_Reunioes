@@ -3,15 +3,54 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 st.set_page_config(
-    page_title="Gerador da Programação (S-140-T)", page_icon="📋", layout="wide"
+    page_title="Gerador da Programação (S-140-T)", page_icon="🔒", layout="wide"
 )
+
+# ==========================================
+# 🔑 CONFIGURAÇÃO DE SEGURANÇA E ACESSO
+# ==========================================
+SENHA_CORRETA = "ariranha2026"  # <--- ALTERE AQUI PARA A SENHA DESEJADA
+
+if "autenticado" not in st.session_state:
+    st.session_state.autenticado = False
+
+
+def verificar_senha():
+    if st.session_state.get("input_senha") == SENHA_CORRETA:
+        st.session_state.autenticado = True
+        st.session_state.input_senha = ""  # Limpa o campo
+    else:
+        st.error("Senha incorreta. Tente novamente.")
+
+
+# Tela de Login (se não estiver autenticado)
+if not st.session_state.autenticado:
+    st.title("🔒 Acesso Restrito")
+    st.subheader(
+        "Por favor, digite a senha da congregação para acessar o gerador."
+    )
+
+    st.text_input(
+        "Digite a Senha de Acesso:",
+        type="password",
+        key="input_senha",
+        on_change=verificar_senha,
+    )
+    st.button("Entrar", on_click=verificar_senha, type="primary")
+
+    st.stop()  # Interrompe a execução do restante do código até acertar a senha
+
+
+# ==========================================
+# 📋 APLICATIVO PRINCIPAL (Liberado após Login)
+# ==========================================
 
 st.title("📋 Gerador Automático de Programação (S-140-T)")
 st.subheader(
     "Suba um ou mais arquivos .RTF das semanas do mês para gerar a programação."
 )
 
-# Inicializa o estado para não perder os dados ao recarregar a página
+# Inicialização da memória persistente
 if "weeks_data" not in st.session_state:
     st.session_state.weeks_data = []
 
@@ -52,7 +91,6 @@ def decode_and_clean_rtf(rtf_bytes):
 
 
 def extract_day_number(week_title):
-    # Extrai o primeiro número do dia para ordenação cronológica (ex: "2 a 8" -> 2)
     match = re.search(r"(\d{1,2})", week_title)
     return int(match.group(1)) if match else 99
 
@@ -111,20 +149,28 @@ if uploaded_files:
         week_info = parse_rtf_week(clean_text)
         extracted.append(week_info)
 
-    # Ordena automaticamente as semanas por data (ordem cronológica)
     extracted.sort(key=lambda x: x["day_sort"])
     st.session_state.weeks_data = extracted
 
 
 if st.session_state.weeks_data:
-    weeks_data = st.session_state.weeks_data
-    st.success(
-        f"{len(weeks_data)} semana(s) carregada(s) e organizadas por data com sucesso!"
-    )
+    col_status, col_btn = st.columns([4, 1])
+    with col_status:
+        st.success(
+            f"{len(st.session_state.weeks_data)} semana(s) salvas no sistema e organizadas!"
+        )
+    with col_btn:
+        if st.button("🗑️ Limpar Programação"):
+            st.session_state.weeks_data = []
+            for k in list(st.session_state.keys()):
+                if k not in ["weeks_data", "autenticado"]:
+                    del st.session_state[k]
+            st.rerun()
 
     st.markdown("---")
     st.header("Preencha os Nomes dos Irmãos Designados")
 
+    weeks_data = st.session_state.weeks_data
     tab_names = [f"Semana {i+1}" for i in range(len(weeks_data))]
     tabs = st.tabs(tab_names)
 
