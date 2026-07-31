@@ -1,4 +1,5 @@
 import re
+import unicodedata
 import pdfplumber
 import streamlit as st
 import streamlit.components.v1 as components
@@ -15,6 +16,40 @@ uploaded_file = st.file_uploader(
 )
 
 
+def sanitize_text(text):
+    if not text:
+        return ""
+
+    # 1. Corrige acentos soltos (ex: 'e ´ oProtetor' -> 'é o Protetor')
+    text = re.sub(r"([a-zA-Z])\s*[\'\`\´\^]\s*([a-zA-Z])", r"\1\2", text)
+    text = (
+        text.replace("´ a", "á")
+        .replace("´ e", "é")
+        .replace("´ i", "í")
+        .replace("´ o", "ó")
+        .replace("´ u", "ú")
+    )
+    text = (
+        text.replace("` a", "à")
+        .replace("^ a", "â")
+        .replace("^ e", "ê")
+        .replace("^ o", "ô")
+    )
+    text = text.replace("~ a", "ã").replace("~ o", "õ").replace(", ca", "ça")
+
+    # 2. Adiciona espaço entre letras minúsculas e maiúsculas coladas (ex: "JoiasEspirituais" -> "Joias Espirituais")
+    text = re.sub(r"([a-zçáéíóúâêôãõ])([A-ZÇÁÉÍÓÚÂÊÔÃÕ])", r"\1 \2", text)
+
+    # 3. Adiciona espaço antes de parenteses colados (ex: "(10min)" -> " (10 min)")
+    text = re.sub(r"([a-zA-Zçáéíóúâêôãõ])\(", r"\1 (", text)
+    text = re.sub(r"\((\d+)\s*min\)", r"(\1 min)", text)
+
+    # 4. Normaliza múltiplos espaços
+    text = " ".join(text.split())
+
+    return text
+
+
 def parse_pdf_plumber(file_bytes):
     full_text = ""
     with pdfplumber.open(file_bytes) as pdf:
@@ -22,7 +57,7 @@ def parse_pdf_plumber(file_bytes):
             txt = page.extract_text(layout=False) or ""
             full_text += txt + "\n"
 
-    # Quebra o texto identificando o início de cada semana pelas datas (ex: 2-8 DE NOVEMBRO, 9-15 DE NOVEMBRO)
+    # Quebra por semanas através das datas no formato oficial do JW (ex: 7-13 DE SETEMBRO)
     weeks_raw = re.split(
         r"(\d{1,2}\s*[\-–—]\s*\d{1,2}\s+DE\s+[A-ZÇÁÉÍÓÚÂÊÔÃÕ]+(?:\s*[\-–—]\s*\d{1,2}\s+DE\s+[A-ZÇÁÉÍÓÚÂÊÔÃÕ]+)?)",
         full_text,
@@ -32,27 +67,26 @@ def parse_pdf_plumber(file_bytes):
     weeks = []
     if len(weeks_raw) > 1:
         for i in range(1, len(weeks_raw), 2):
-            date_header = weeks_raw[i].strip()
+            date_header = sanitize_text(weeks_raw[i])
             content = weeks_raw[i + 1] if i + 1 < len(weeks_raw) else ""
 
-            # Tenta pegar a leitura bíblica na mesma linha ou logo após a data
+            # Extração da Leitura Bíblica da semana
             reading_match = re.search(r"\|\s*([^\n\r•]+)", content)
             reading = (
-                reading_match.group(1).strip() if reading_match else ""
+                sanitize_text(reading_match.group(1)) if reading_match else ""
             )
 
             full_title = (
                 f"{date_header} | {reading}" if reading else date_header
             )
-            full_title = " ".join(full_title.split())
 
-            # Extração de Cânticos
+            # Extração dos Cânticos da semana
             songs = re.findall(r"Cântico\s+\d+", content, re.IGNORECASE)
             song_start = songs[0] if len(songs) > 0 else "Cântico"
             song_mid = songs[1] if len(songs) > 1 else "Cântico"
             song_end = songs[2] if len(songs) > 2 else "Cântico"
 
-            # Extração das Partes (ex: 1. Titulo (10 min))
+            # Captura TODAS as partes numeradas (ex: "1. Titulo da Parte (10 min)")
             raw_parts = re.findall(
                 r"(\d{1,2}\.\s*[^0-9\n\•]+?\(\d+\s*min\))", content
             )
@@ -60,27 +94,18 @@ def parse_pdf_plumber(file_bytes):
             seen_nums = set()
             clean_parts = []
             for p in raw_parts:
-                p_clean = " ".join(p.split())
+                p_clean = sanitize_text(p)
                 num = p_clean.split(".")[0].strip()
-                if num not in seen_nums:
+                if num.isdigit() and num not in seen_nums:
                     seen_nums.add(num)
-                    clean_parts.append(p_clean)
+                    clean_parts.append((int(num), p_clean))
 
-            tesouros = []
-            ministerio = []
-            vida = []
+            # Ordena as partes pelo número da designação
+            clean_parts.sort(key=lambda x: x[0])
 
-            for p in clean_parts:
-                try:
-                    num = int(p.split(".")[0].strip())
-                    if 1 <= num <= 3:
-                        tesouros.append(p)
-                    elif 4 <= num <= 6:
-                        ministerio.append(p)
-                    elif num >= 7:
-                        vida.append(p)
-                except ValueError:
-                    continue
+            tesouros = [p[1] for p in clean_parts if 1 <= p[0] <= 3]
+            ministerio = [p[1] for p in clean_parts if 4 <= p[0] <= 6]
+            vida = [p[1] for p in clean_parts if p[0] >= 7]
 
             weeks.append({
                 "title": full_title,
