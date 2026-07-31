@@ -1,4 +1,6 @@
+import os
 import re
+import sqlite3
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -9,7 +11,7 @@ st.set_page_config(
 # ==========================================
 # 🔑 CONFIGURAÇÃO DE SEGURANÇA E ACESSO
 # ==========================================
-SENHA_CORRETA = "ariranha2026"  # <--- ALTERE AQUI PARA A SENHA DESEJADA
+SENHA_CORRETA = "ariranha2026"
 
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
@@ -18,12 +20,11 @@ if "autenticado" not in st.session_state:
 def verificar_senha():
     if st.session_state.get("input_senha") == SENHA_CORRETA:
         st.session_state.autenticado = True
-        st.session_state.input_senha = ""  # Limpa o campo
+        st.session_state.input_senha = ""
     else:
         st.error("Senha incorreta. Tente novamente.")
 
 
-# Tela de Login (se não estiver autenticado)
 if not st.session_state.autenticado:
     st.title("🔒 Acesso Restrito")
     st.subheader(
@@ -38,11 +39,56 @@ if not st.session_state.autenticado:
     )
     st.button("Entrar", on_click=verificar_senha, type="primary")
 
-    st.stop()  # Interrompe a execução do restante do código até acertar a senha
+    st.stop()
 
 
 # ==========================================
-# 📋 APLICATIVO PRINCIPAL (Liberado após Login)
+# 💾 BANCO DE DADOS LOCAL (PERSISTÊNCIA NA NUVEM/SISTEMA)
+# ==========================================
+DB_FILE = "dados_programacao.db"
+
+
+def init_db():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute(
+        "CREATE TABLE IF NOT EXISTS configuracao (id INTEGER PRIMARY KEY, chave TEXT UNIQUE, valor TEXT)"
+    )
+    conn.commit()
+    conn.close()
+
+
+def salvar_dado_db(chave, valor):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute(
+        "INSERT OR REPLACE INTO configuracao (chave, valor) VALUES (?, ?)",
+        (chave, str(valor)),
+    )
+    conn.commit()
+    conn.close()
+
+
+def carregar_dado_db(chave, default=""):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT valor FROM configuracao WHERE chave = ?", (chave,))
+    row = c.fetchone()
+    conn.close()
+    return row[0] if row else default
+
+
+def limpar_db():
+    if os.path.exists(DB_FILE):
+        os.remove(DB_FILE)
+    init_db()
+
+
+init_db()
+
+
+# ==========================================
+# 📋 APLICATIVO PRINCIPAL
 # ==========================================
 
 st.title("📋 Gerador Automático de Programação (S-140-T)")
@@ -50,11 +96,6 @@ st.subheader(
     "Suba um ou mais arquivos .RTF das semanas do mês para gerar a programação."
 )
 
-# Inicialização da memória persistente
-if "weeks_data" not in st.session_state:
-    st.session_state.weeks_data = []
-
-# Upload de arquivos RTF
 uploaded_files = st.file_uploader(
     "Escolha os arquivos .RTF das semanas (pode selecionar vários)",
     type=["rtf"],
@@ -64,8 +105,6 @@ uploaded_files = st.file_uploader(
 
 def decode_and_clean_rtf(rtf_bytes):
     text = rtf_bytes.decode("latin-1", errors="ignore")
-
-    # Remove tags de HYPERLINK e urls do RTF
     text = re.sub(
         r"\{\\field\{\\\*\\fldinst\s*\{HYPERLINK[^\}]+\}\}\s*\{\\fldrslt\s*\{([^\}]+)\}\}\}",
         r"\1",
@@ -73,20 +112,14 @@ def decode_and_clean_rtf(rtf_bytes):
     )
     text = re.sub(r"HYPERLINK\s+\"[^\"]+\"", "", text)
 
-    # Converte acentuação unicode do RTF (\u227? -> ã)
     def replace_unicode(match):
         code = int(match.group(1))
         return chr(code)
 
     text = re.sub(r"\\u(\d+)\?", replace_unicode, text)
-
-    # Limpa comandos e tags RTF
     text = re.sub(r"\\[a-zA-Z0-9]+\b\s?", " ", text)
     text = re.sub(r"[{}]", "", text)
-
-    text = " ".join(text.split())
-    text = text.replace("*", "").strip()
-
+    text = " ".join(text.split()).replace("*", "").strip()
     return text
 
 
@@ -141,6 +174,7 @@ def parse_rtf_week(clean_text):
     }
 
 
+# Salva estrutura das semanas se houver upload novo
 if uploaded_files:
     extracted = []
     for file in uploaded_files:
@@ -151,20 +185,27 @@ if uploaded_files:
 
     extracted.sort(key=lambda x: x["day_sort"])
     st.session_state.weeks_data = extracted
+    salvar_dado_db("weeks_data", extracted)
 
+# Restaura semanas do banco se recarregou a página
+if "weeks_data" not in st.session_state or not st.session_state.weeks_data:
+    raw_saved = carregar_dado_db("weeks_data", None)
+    if raw_saved:
+        try:
+            st.session_state.weeks_data = eval(raw_saved)
+        except:
+            st.session_state.weeks_data = []
 
-if st.session_state.weeks_data:
+if st.session_state.get("weeks_data"):
     col_status, col_btn = st.columns([4, 1])
     with col_status:
         st.success(
-            f"{len(st.session_state.weeks_data)} semana(s) salvas no sistema e organizadas!"
+            f"{len(st.session_state.weeks_data)} semana(s) registradas e salvas na memória!"
         )
     with col_btn:
-        if st.button("🗑️ Limpar Programação"):
+        if st.button("🗑️ Limpar Tudo"):
+            limpar_db()
             st.session_state.weeks_data = []
-            for k in list(st.session_state.keys()):
-                if k not in ["weeks_data", "autenticado"]:
-                    del st.session_state[k]
             st.rerun()
 
     st.markdown("---")
@@ -183,49 +224,75 @@ if st.session_state.weeks_data:
 
             col1, col2 = st.columns(2)
             with col1:
+                key_p = f"pres_{idx}"
+                val_p = carregar_dado_db(key_p, "")
                 pres = st.text_input(
-                    "Presidente", key=f"pres_{idx}", placeholder="Nome do irmão"
-                )
-            with col2:
-                or_ini = st.text_input(
-                    "Oração Inicial",
-                    key=f"or_ini_{idx}",
+                    "Presidente",
+                    value=val_p,
+                    key=key_p,
                     placeholder="Nome do irmão",
                 )
+                salvar_dado_db(key_p, pres)
+
+            with col2:
+                key_oi = f"or_ini_{idx}"
+                val_oi = carregar_dado_db(key_oi, "")
+                or_ini = st.text_input(
+                    "Oração Inicial",
+                    value=val_oi,
+                    key=key_oi,
+                    placeholder="Nome do irmão",
+                )
+                salvar_dado_db(key_oi, or_ini)
 
             st.markdown("**TESOUROS DA PALAVRA DE DEUS**")
             t_des = []
             for p_idx, part_title in enumerate(week["tesouros"]):
+                key_t = f"t_{idx}_{p_idx}"
+                val_t = carregar_dado_db(key_t, "")
                 val = st.text_input(
                     part_title,
-                    key=f"t_{idx}_{p_idx}",
+                    value=val_t,
+                    key=key_t,
                     placeholder="Nome do irmão",
                 )
+                salvar_dado_db(key_t, val)
                 t_des.append((part_title, val))
 
             st.markdown("**FAÇA SEU MELHOR NO MINISTÉRIO**")
             m_des = []
             for p_idx, part_title in enumerate(week["ministerio"]):
+                key_m = f"m_{idx}_{p_idx}"
+                val_m = carregar_dado_db(key_m, "")
                 val = st.text_input(
-                    part_title, key=f"m_{idx}_{p_idx}", placeholder="Nome(s)"
+                    part_title, value=val_m, key=key_m, placeholder="Nome(s)"
                 )
+                salvar_dado_db(key_m, val)
                 m_des.append((part_title, val))
 
             st.markdown("**NOSSA VIDA CRISTÃ**")
             v_des = []
             for p_idx, part_title in enumerate(week["vida"]):
+                key_v = f"v_{idx}_{p_idx}"
+                val_v = carregar_dado_db(key_v, "")
                 val = st.text_input(
                     part_title,
-                    key=f"v_{idx}_{p_idx}",
+                    value=val_v,
+                    key=key_v,
                     placeholder="Nome / Dirigente e Leitor",
                 )
+                salvar_dado_db(key_v, val)
                 v_des.append((part_title, val))
 
+            key_of = f"or_fim_{idx}"
+            val_of = carregar_dado_db(key_of, "")
             or_fim = st.text_input(
                 "Oração Final",
-                key=f"or_fim_{idx}",
+                value=val_of,
+                key=key_of,
                 placeholder="Nome do irmão",
             )
+            salvar_dado_db(key_of, or_fim)
 
             form_data.append({
                 "week": week,
