@@ -123,13 +123,38 @@ def decode_and_clean_rtf(rtf_bytes):
     return text
 
 
-def extract_day_number(week_title):
-    match = re.search(r"(\d{1,2})", week_title)
-    return int(match.group(1)) if match else 99
+def extract_sort_key(week_title):
+    # Mapeamento de meses para ordenação correta
+    meses = {
+        "janeiro": 1,
+        "fevereiro": 2,
+        "março": 3,
+        "marco": 3,
+        "abril": 4,
+        "maio": 5,
+        "junho": 6,
+        "julho": 7,
+        "agosto": 8,
+        "setembro": 9,
+        "outubro": 10,
+        "novembro": 11,
+        "dezembro": 12,
+    }
+
+    match_day = re.search(r"(\d{1,2})", week_title)
+    day = int(match_day.group(1)) if match_day else 99
+
+    month_num = 99
+    for m_nome, m_id in meses.items():
+        if m_nome in week_title.lower():
+            month_num = m_id
+            break
+
+    # Retorna uma tupla (Mês, Dia) para ordenar mês primeiro e depois dia
+    return (month_num, day)
 
 
 def parse_rtf_week_contextual(clean_text):
-    # Procura a data da semana
     week_match = re.search(
         r"(\d{1,2}\s+a\s+\d{1,2}\s+de\s+[a-zçáéíóúâêôãõ]+\s*\([^)]+\))",
         clean_text,
@@ -139,18 +164,11 @@ def parse_rtf_week_contextual(clean_text):
         week_match.group(1).strip() if week_match else "Semana da Reunião"
     )
 
-    # Extração de Cânticos
     songs = re.findall(r"Cântico\s+\d+", clean_text, re.IGNORECASE)
     song_start = songs[0] if len(songs) > 0 else "Cântico"
     song_mid = songs[1] if len(songs) > 1 else "Cântico"
     song_end = songs[2] if len(songs) > 2 else "Cântico"
 
-    # Quebra o texto por SeçõesOficiais para não errar a categoria das partes
-    sec_tesouros = ""
-    sec_ministerio = ""
-    sec_vida = ""
-
-    # Marcadores das seções no RTF
     pos_tesouros = re.search(
         r"Tesouros da Palavra de Deus", clean_text, re.IGNORECASE
     )
@@ -188,7 +206,7 @@ def parse_rtf_week_contextual(clean_text):
 
     return {
         "title": week_title,
-        "day_sort": extract_day_number(week_title),
+        "sort_key": extract_sort_key(week_title),
         "song_start": song_start,
         "song_mid": song_mid,
         "song_end": song_end,
@@ -207,7 +225,8 @@ if uploaded_files:
         week_info = parse_rtf_week_contextual(clean_text)
         extracted.append(week_info)
 
-    extracted.sort(key=lambda x: x["day_sort"])
+    # Ordena cronologicamente por Mês e depois por Dia
+    extracted.sort(key=lambda x: x["sort_key"])
     st.session_state.weeks_data = extracted
     salvar_dado_db("weeks_data", extracted)
 
@@ -224,7 +243,7 @@ if st.session_state.get("weeks_data"):
     col_status, col_btn = st.columns([4, 1])
     with col_status:
         st.success(
-            f"{len(st.session_state.weeks_data)} semana(s) registadas e salvas na memória!"
+            f"{len(st.session_state.weeks_data)} semana(s) registradas e salvas na memória!"
         )
     with col_btn:
         if st.button("🗑️ Limpar Tudo"):
@@ -356,7 +375,9 @@ if st.session_state.get("weeks_data"):
                         <td style="text-align:right;"><b>Oração Inicial:</b> {item['or_ini']}</td>
                     </tr>
                 </table>
-                <div class="song-row">• {week['song_start']} &nbsp;|&nbsp; • Comentários iniciais (1 min)</div>
+                
+                <div class="song-row">• {week['song_start']}</div>
+                <div class="song-row">• Comentários iniciais (1 min)</div>
                 
                 <div class="section-header tesouros">TESOUROS DA PALAVRA DE DEUS <span style="float:right; font-weight:normal;">Salão principal</span></div>
                 <table class="program-table">{build_rows(item['t_des'])}</table>
@@ -368,7 +389,9 @@ if st.session_state.get("weeks_data"):
                 <div class="song-row">• {week['song_mid']}</div>
                 <table class="program-table">{build_rows(item['v_des'])}</table>
                 
-                <div class="song-row">• Comentários finais (3 min) &nbsp;|&nbsp; • {week['song_end']}</div>
+                <div class="song-row">• Comentários finais (3 min)</div>
+                <div class="song-row">• {week['song_end']}</div>
+                
                 <table class="footer-roles">
                     <tr>
                         <td><b>Oração Final:</b> {item['or_fim']}</td>
@@ -414,7 +437,7 @@ if st.session_state.get("weeks_data"):
                 .program-table td {{ padding: 5px 6px; border-bottom: 1px solid #f1f5f9; }}
                 .p-title {{ text-align: left; }}
                 .p-val {{ text-align: right; font-weight: bold; width: 38%; }}
-                .song-row {{ font-weight: bold; background: #f8fafc !important; padding: 4px 6px; font-size: 8.5pt; border-top: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0; margin: 5px 0; }}
+                .song-row {{ font-weight: bold; background: #f8fafc !important; padding: 4px 6px; font-size: 8.5pt; border-top: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0; margin: 3px 0; }}
                 .footer-roles {{ width: 100%; margin-top: 12px; border-top: 1px solid #cbd5e1; padding-top: 4px; }}
                 .print-btn {{
                     background: #2563eb; color: white; border: none; padding: 12px 20px;
