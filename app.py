@@ -142,14 +142,12 @@ def extract_sort_key(week_title):
 
     title_lower = week_title.lower()
 
-    # Identifica o mês
     month_num = 99
     for idx, m_nome in enumerate(meses):
         if m_nome in title_lower:
             month_num = (idx % 12) + 1
             break
 
-    # Identifica o primeiro dia do intervalo (ex: "14 a 20" -> 14)
     match_day = re.search(r"(\d{1,2})", week_title)
     day = int(match_day.group(1)) if match_day else 99
 
@@ -157,11 +155,19 @@ def extract_sort_key(week_title):
 
 
 def parse_rtf_week_contextual(clean_text):
+    # Regex flexibilizada para pegar viradas de mês e qualquer formato de data do JW
     week_match = re.search(
-        r"(\d{1,2}\s+a\s+\d{1,2}\s+de\s+[a-zçáéíóúâêôãõ]+\s*\([^)]+\))",
+        r"(\d{1,2}\s+(?:a\s+\d{1,2}\s+de\s+[a-zçáéíóúâêôãõ]+|de\s+[a-zçáéíóúâêôãõ]+\s+a\s+\d{1,2}\s+de\s+[a-zçáéíóúâêôãõ]+)\s*\([^)]+\))",
         clean_text,
         re.IGNORECASE,
     )
+
+    if not week_match:
+        # Busca genérica para títulos com parênteses bíblicos
+        week_match = re.search(
+            r"(\d{1,2}[^\(\n\r]+?\([^\)]+\))", clean_text, re.IGNORECASE
+        )
+
     week_title = (
         week_match.group(1).strip() if week_match else "Semana da Reunião"
     )
@@ -227,7 +233,6 @@ if uploaded_files:
         week_info = parse_rtf_week_contextual(clean_text)
         extracted.append(week_info)
 
-    # Ordenação estrita por (Mês, Dia)
     extracted.sort(key=lambda x: x["sort_key"])
     st.session_state.weeks_data = extracted
     salvar_dado_db("weeks_data", extracted)
@@ -439,7 +444,7 @@ if st.session_state.get("weeks_data"):
                 .program-table td {{ padding: 8px 8px; border-bottom: 1px solid #e2e8f0; font-size: 10pt; line-height: 1.3; }}
                 .p-title {{ text-align: left; }}
                 .p-val {{ text-align: right; font-weight: bold; width: 40%; }}
-                .song-row {{ font-weight: bold; background: #f8fafc !important; padding: 6px 8px; font-size: 9.5pt; border-top: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0; margin: 6px 0; }}
+                .song-row {{ font-weight: bold; background: #f8fafc !important; padding: 6px 8px; font-size: 9.5pt; border-top: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0; margin: 3px 0; }}
                 .footer-roles {{ width: 100%; margin-top: 18px; border-top: 1px solid #cbd5e1; padding-top: 6px; font-size: 10pt; }}
                 .print-btn {{
                     background: #2563eb; color: white; border: none; padding: 12px 20px;
