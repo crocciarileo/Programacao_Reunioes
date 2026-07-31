@@ -43,7 +43,7 @@ if not st.session_state.autenticado:
 
 
 # ==========================================
-# 💾 BANCO DE DADOS LOCAL (PERSISTÊNCIA NA NUVEM)
+# 💾 BANCO DE DADOS LOCAL (PERSISTÊNCIA)
 # ==========================================
 DB_FILE = "dados_programacao.db"
 
@@ -124,33 +124,35 @@ def decode_and_clean_rtf(rtf_bytes):
 
 
 def extract_sort_key(week_title):
-    # Mapeamento de meses para ordenação correta
-    meses = {
-        "janeiro": 1,
-        "fevereiro": 2,
-        "março": 3,
-        "marco": 3,
-        "abril": 4,
-        "maio": 5,
-        "junho": 6,
-        "julho": 7,
-        "agosto": 8,
-        "setembro": 9,
-        "outubro": 10,
-        "novembro": 11,
-        "dezembro": 12,
-    }
+    meses = [
+        "janeiro",
+        "fevereiro",
+        "março",
+        "marco",
+        "abril",
+        "maio",
+        "junho",
+        "julho",
+        "agosto",
+        "setembro",
+        "outubro",
+        "novembro",
+        "dezembro",
+    ]
 
+    title_lower = week_title.lower()
+
+    # Identifica o mês
+    month_num = 99
+    for idx, m_nome in enumerate(meses):
+        if m_nome in title_lower:
+            month_num = (idx % 12) + 1
+            break
+
+    # Identifica o primeiro dia do intervalo (ex: "14 a 20" -> 14)
     match_day = re.search(r"(\d{1,2})", week_title)
     day = int(match_day.group(1)) if match_day else 99
 
-    month_num = 99
-    for m_nome, m_id in meses.items():
-        if m_nome in week_title.lower():
-            month_num = m_id
-            break
-
-    # Retorna uma tupla (Mês, Dia) para ordenar mês primeiro e depois dia
     return (month_num, day)
 
 
@@ -225,7 +227,7 @@ if uploaded_files:
         week_info = parse_rtf_week_contextual(clean_text)
         extracted.append(week_info)
 
-    # Ordena cronologicamente por Mês e depois por Dia
+    # Ordenação estrita por (Mês, Dia)
     extracted.sort(key=lambda x: x["sort_key"])
     st.session_state.weeks_data = extracted
     salvar_dado_db("weeks_data", extracted)
@@ -395,7 +397,7 @@ if st.session_state.get("weeks_data"):
                 <table class="footer-roles">
                     <tr>
                         <td><b>Oração Final:</b> {item['or_fim']}</td>
-                        <td style="text-align:right; color:#64748b; font-size:8pt;">S-140-T 11/23</td>
+                        <td style="text-align:right; color:#64748b; font-size:8.5pt;">S-140-T 11/23</td>
                     </tr>
                 </table>
             </div>
@@ -422,23 +424,23 @@ if st.session_state.get("weeks_data"):
                     }}
                     .page-container:last-child {{ page-break-after: avoid; }}
                 }}
-                body {{ font-family: Arial, sans-serif; font-size: 9.5pt; color: #000; margin: 10px; }}
-                .page-container {{ background: white; padding: 15px; margin-bottom: 20px; border: 1px solid #ccc; }}
-                .header-table {{ width: 100%; margin-bottom: 6px; }}
-                .cong-name {{ font-size: 13pt; font-weight: bold; }}
-                .week-info {{ font-size: 11pt; font-weight: bold; color: #2563eb; text-align: right; }}
-                .doc-title {{ font-size: 12pt; font-weight: bold; text-align: center; margin: 6px 0 10px 0; text-transform: uppercase; border-bottom: 2px solid #2563eb; padding-bottom: 4px; }}
-                .roles-bar {{ width: 100%; margin-bottom: 8px; background: #f8fafc !important; border: 1px solid #cbd5e1; padding: 4px 8px; }}
-                .section-header {{ color: #fff !important; font-weight: bold; padding: 4px 6px; margin-top: 8px; font-size: 9pt; }}
+                body {{ font-family: Arial, sans-serif; font-size: 10pt; color: #000; margin: 10px; }}
+                .page-container {{ background: white; padding: 22px; margin-bottom: 25px; border: 1px solid #ccc; }}
+                .header-table {{ width: 100%; margin-bottom: 10px; }}
+                .cong-name {{ font-size: 14pt; font-weight: bold; }}
+                .week-info {{ font-size: 13pt; font-weight: bold; color: #2563eb; text-align: right; }}
+                .doc-title {{ font-size: 13pt; font-weight: bold; text-align: center; margin: 10px 0 14px 0; text-transform: uppercase; border-bottom: 2px solid #2563eb; padding-bottom: 6px; }}
+                .roles-bar {{ width: 100%; margin-bottom: 12px; background: #f8fafc !important; border: 1px solid #cbd5e1; padding: 7px 10px; font-size: 10pt; }}
+                .section-header {{ color: #fff !important; font-weight: bold; padding: 6px 8px; margin-top: 14px; font-size: 10pt; }}
                 .tesouros {{ background: #52606d !important; }}
                 .ministerio {{ background: #c17d11 !important; }}
                 .vida {{ background: #962525 !important; }}
-                .program-table {{ width: 100%; border-collapse: collapse; }}
-                .program-table td {{ padding: 5px 6px; border-bottom: 1px solid #f1f5f9; }}
+                .program-table {{ width: 100%; border-collapse: collapse; margin-bottom: 4px; }}
+                .program-table td {{ padding: 8px 8px; border-bottom: 1px solid #e2e8f0; font-size: 10pt; line-height: 1.3; }}
                 .p-title {{ text-align: left; }}
-                .p-val {{ text-align: right; font-weight: bold; width: 38%; }}
-                .song-row {{ font-weight: bold; background: #f8fafc !important; padding: 4px 6px; font-size: 8.5pt; border-top: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0; margin: 3px 0; }}
-                .footer-roles {{ width: 100%; margin-top: 12px; border-top: 1px solid #cbd5e1; padding-top: 4px; }}
+                .p-val {{ text-align: right; font-weight: bold; width: 40%; }}
+                .song-row {{ font-weight: bold; background: #f8fafc !important; padding: 6px 8px; font-size: 9.5pt; border-top: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0; margin: 6px 0; }}
+                .footer-roles {{ width: 100%; margin-top: 18px; border-top: 1px solid #cbd5e1; padding-top: 6px; font-size: 10pt; }}
                 .print-btn {{
                     background: #2563eb; color: white; border: none; padding: 12px 20px;
                     font-size: 14px; font-weight: bold; border-radius: 6px; cursor: pointer;
